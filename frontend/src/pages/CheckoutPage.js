@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useMutation } from 'react-query';
@@ -10,20 +10,24 @@ import {
   CreditCardIcon,
   TruckIcon,
   ShieldCheckIcon,
-  LockClosedIcon
+  LockClosedIcon,
+  InformationCircleIcon
 } from '@heroicons/react/24/outline';
 import { formatPrice } from '../utils/currency';
 import { getBookImageUrl } from '../utils/imageUtils';
+import { calculateShippingCharges, getShippingInfo, validatePincode } from '../utils/shippingUtils';
 import OrderConfirmationModal from '../components/ui/OrderConfirmationModal';
 
 const CheckoutPage = () => {
   const navigate = useNavigate();
-  const { items, total, clearCart, couponDiscount, appliedCoupon, getDiscountedTotal, getFinalTotal } = useCart();
+  const { items, total, clearCart, couponDiscount, appliedCoupon, getDiscountedTotal } = useCart();
   const { user } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('razorpay');
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState(null);
+  const [currentPincode, setCurrentPincode] = useState(user?.address?.zipCode || '');
+  const [shippingCharges, setShippingCharges] = useState(70); // Default shipping
 
   console.log('CheckoutPage render - State:', { 
     showConfirmation, 
@@ -34,7 +38,9 @@ const CheckoutPage = () => {
   const {
     register,
     handleSubmit,
-    formState: { errors }
+    formState: { errors },
+    watch,
+    reset
   } = useForm({
     defaultValues: {
       name: user?.name || '',
@@ -49,11 +55,47 @@ const CheckoutPage = () => {
     }
   });
 
-  // Calculate totals
+  // Update form when user data changes
+  useEffect(() => {
+    if (user) {
+      reset({
+        name: user.name || '',
+        email: user.email || '',
+        phone: user.phone || '',
+        street: user.address?.street || '',
+        landmark: user.address?.landmark || '',
+        city: user.address?.city || '',
+        state: user.address?.state || '',
+        zipCode: user.address?.zipCode || '',
+        country: user.address?.country || 'India'
+      });
+    }
+  }, [user, reset]);
+
+  // Watch zipCode changes to update shipping charges
+  const watchedZipCode = watch('zipCode');
+
+  // Update shipping charges when pincode changes
+  useEffect(() => {
+    if (watchedZipCode && watchedZipCode.length === 6) {
+      const validation = validatePincode(watchedZipCode);
+      if (validation.isValid) {
+        setCurrentPincode(watchedZipCode);
+        const discountedSubtotal = getDiscountedTotal();
+        const newShippingCharges = calculateShippingCharges(watchedZipCode, discountedSubtotal);
+        setShippingCharges(newShippingCharges);
+      }
+    }
+  }, [watchedZipCode, getDiscountedTotal]);
+
+  // Calculate totals with dynamic shipping
   const subtotal = total;
   const discountedSubtotal = getDiscountedTotal();
-  const shippingCost = discountedSubtotal >= 2000 ? 0 : 70;
-  const finalTotal = getFinalTotal();
+  const shippingCost = shippingCharges;
+  const finalTotal = discountedSubtotal + shippingCost;
+
+  // Get shipping info for display
+  const shippingInfo = getShippingInfo(currentPincode, discountedSubtotal);
 
   // Create Razorpay order
   const createRazorpayOrder = useMutation(
@@ -155,6 +197,7 @@ const CheckoutPage = () => {
         email: data.email,
         phone: data.phone,
         street: data.street,
+        landmark: data.landmark,
         city: data.city,
         state: data.state,
         zipCode: data.zipCode,
@@ -296,8 +339,8 @@ const CheckoutPage = () => {
                       <input
                         type="text"
                         placeholder="Near hospital, school, etc."
-                        className={`form-input ${errors.landmark ? 'border-red-500' : ''}`}
-                        {...register('landmark', { required: 'Landmark is required'})}
+                        className="form-input"
+                        {...register('landmark')}
                       />
                       <p className="text-xs text-gray-500 mt-1">Landmark helps delivery person locate your address easily</p>
                     </div>
@@ -349,6 +392,23 @@ const CheckoutPage = () => {
                       />
                       {errors.zipCode && <p className="text-red-500 text-sm mt-1">{errors.zipCode.message}</p>}
                       <p className="text-xs text-gray-500 mt-1">Enter 6-digit PIN code (e.g., 110001)</p>
+                      
+                      {/* Shipping Info Display */}
+                      {currentPincode && currentPincode.length === 6 && (
+                        <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
+                          <div className="flex items-center text-sm">
+                            <TruckIcon className="h-4 w-4 text-blue-600 mr-1" />
+                            <span className="text-blue-800">
+                              <strong>{shippingInfo.description}</strong> to {shippingInfo.region}
+                            </span>
+                          </div>
+                          {shippingInfo.charges > 0 && (
+                            <p className="text-xs text-blue-600 mt-1">
+                              Add ₹{2000 - discountedSubtotal > 0 ? 2000 - discountedSubtotal : 0} more for free shipping
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="md:col-span-1">
@@ -360,6 +420,54 @@ const CheckoutPage = () => {
                         <option value="India">India</option>
                       </select>
                       {errors.country && <p className="text-red-500 text-sm mt-1">{errors.country.message}</p>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Shipping Information Display */}
+                <div className="bg-white rounded-lg shadow-sm p-4 md:p-6">
+                  <div className="flex items-center mb-4">
+                    <InformationCircleIcon className="h-5 w-5 text-blue-600 mr-2" />
+                    <h2 className="text-lg font-semibold text-gray-900">Shipping Charges</h2>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center">
+                        <TruckIcon className="h-5 w-5 text-gray-600 mr-2" />
+                        <div>
+                          <p className="font-medium text-gray-900">West Bengal</p>
+                          <p className="text-sm text-gray-600">PIN codes: 700000-743999</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-gray-900">₹70</p>
+                        <p className="text-xs text-gray-500">Shipping charges</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center">
+                        <TruckIcon className="h-5 w-5 text-gray-600 mr-2" />
+                        <div>
+                          <p className="font-medium text-gray-900">Other States</p>
+                          <p className="text-sm text-gray-600">All other PIN codes</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-gray-900">₹100</p>
+                        <p className="text-xs text-gray-500">Shipping charges</p>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-center">
+                        <ShieldCheckIcon className="h-5 w-5 text-green-600 mr-2" />
+                        <div>
+                          <p className="font-medium text-green-900">Free Shipping</p>
+                          <p className="text-sm text-green-700">On orders above ₹2,000 (All India)</p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -451,7 +559,14 @@ const CheckoutPage = () => {
                       </div>
                     )}
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Shipping</span>
+                      <div className="flex flex-col">
+                        <span className="text-gray-600">Shipping</span>
+                        {currentPincode && currentPincode.length === 6 && (
+                          <span className="text-xs text-gray-500">
+                            {shippingInfo.region} ({currentPincode})
+                          </span>
+                        )}
+                      </div>
                       <span className="font-medium">
                         {shippingCost === 0 ? 'FREE' : formatPrice(shippingCost)}
                       </span>
