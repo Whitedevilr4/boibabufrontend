@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useForm } from 'react-hook-form';
@@ -27,7 +27,8 @@ const AdminBookForm = () => {
     register,
     handleSubmit,
     formState: { errors },
-    setValue
+    watch,
+    reset
   } = useForm({
     defaultValues: {
       featured: false,
@@ -37,7 +38,7 @@ const AdminBookForm = () => {
   });
 
   // Fetch book data for editing
-  const { isLoading } = useQuery(
+  const { data: bookData, isLoading } = useQuery(
     ['book', id],
     () => {
       return api.get(`/api/books/${id}`).then(res => res.data);
@@ -45,14 +46,8 @@ const AdminBookForm = () => {
     {
       enabled: isEditing,
       onSuccess: (data) => {
-        // Populate form with existing data
-        Object.keys(data).forEach(key => {
-          if (key === 'publishedDate' && data[key]) {
-            setValue(key, new Date(data[key]).toISOString().split('T')[0]);
-          } else if (key !== 'images' && key !== '_id' && key !== '__v' && key !== 'createdAt' && key !== 'updatedAt') {
-            setValue(key, data[key]);
-          }
-        });
+        console.log('Book data received for editing:', data);
+        console.log('Original price in data:', data.originalPrice, typeof data.originalPrice);
         
         // Set existing images for preview
         if (data.images && data.images.length > 0) {
@@ -65,54 +60,99 @@ const AdminBookForm = () => {
     }
   );
 
-  // Fetch categories - with fallback to static categories
+  // Watch originalPrice to debug
+  const watchedOriginalPrice = watch('originalPrice');
+  
+  useEffect(() => {
+    if (isEditing) {
+      console.log('Watched originalPrice value:', watchedOriginalPrice);
+    }
+  }, [watchedOriginalPrice, isEditing]);
+
+  // Reset form when book data changes
+  useEffect(() => {
+    if (isEditing && bookData) {
+      console.log('Resetting form with book data:', bookData);
+      
+      const formData = {
+        ...bookData,
+        publishedDate: bookData.publishedDate ? new Date(bookData.publishedDate).toISOString().split('T')[0] : '',
+        price: bookData.price ? Number(bookData.price) : '',
+        originalPrice: bookData.originalPrice && bookData.originalPrice > 0 ? Number(bookData.originalPrice) : '',
+        stock: bookData.stock ? Number(bookData.stock) : 0,
+        pages: bookData.pages ? Number(bookData.pages) : ''
+      };
+      
+      // Remove fields that shouldn't be in the form
+      delete formData.images;
+      delete formData._id;
+      delete formData.__v;
+      delete formData.createdAt;
+      delete formData.updatedAt;
+      delete formData.reviews;
+      delete formData.rating;
+      
+      console.log('Form data being set:', formData);
+      console.log('Original price being set:', formData.originalPrice);
+      
+      reset(formData);
+      
+      // Double-check that originalPrice is set correctly
+      setTimeout(() => {
+        console.log('After reset - originalPrice value:', watch('originalPrice'));
+      }, 100);
+    }
+  }, [isEditing, bookData, reset, watch]);
+
+  // Fetch categories - prioritize admin-created categories
   const { data: apiCategories, isLoading: categoriesLoading, error: categoriesError } = useQuery(
     'categories',
     async () => {
-      const baseURL = process.env.REACT_APP_API_URL || 'https://boibabu.vercel.app';
-      const url = `${baseURL}/api/categories`;
-      console.log('Fetching categories from:', url);
-      
       try {
-        const response = await api.get(url);
-        console.log('Categories response status:', response.status);
-        console.log('Categories response data:', response.data);
-        console.log('Categories count:', response.data?.length);
+        const response = await api.get('/api/categories');
+        console.log('Categories API response:', response.data);
         return response.data;
       } catch (error) {
-        console.error('Categories fetch error:', error);
-        console.error('Error response:', error.response);
-        throw error;
+        console.error('Failed to fetch categories:', error);
+        throw error; // Let React Query handle the error
       }
     },
     {
       staleTime: 5 * 60 * 1000, // 5 minutes
       cacheTime: 10 * 60 * 1000, // 10 minutes
       refetchOnWindowFocus: false,
-      refetchOnMount: true,
+      retry: 3, // Retry 3 times before giving up
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
       onError: (error) => {
-        console.error('React Query onError - Failed to fetch categories:', error);
-        console.error('Error details:', error.response?.data);
-        console.error('Error status:', error.response?.status);
-        // Don't show error toast, we'll fall back to static categories
+        console.error('Categories fetch failed after retries:', error);
       },
       onSuccess: (data) => {
-        console.log('React Query onSuccess - Categories loaded successfully:', data);
-        console.log('Categories array length:', data?.length);
-      },
-      retry: 2,
-      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000)
+        console.log('Categories loaded successfully:', data?.length, 'categories');
+      }
     }
   );
 
-  // Use API categories if available, otherwise fall back to static categories
+  // Use admin-created categories first, then fall back to static categories only if API fails completely
   const categories = React.useMemo(() => {
+    if (categoriesLoading) {
+      // Show loading state but don't return categories yet
+      return [];
+    }
+    
     if (apiCategories && Array.isArray(apiCategories) && apiCategories.length > 0) {
+      console.log('Using admin-created categories:', apiCategories.length);
       return apiCategories.map(cat => ({ _id: cat._id, name: cat.name }));
     }
-    // Fallback to static categories
-    return BOOK_CATEGORIES.map(name => ({ _id: name, name }));
-  }, [apiCategories]);
+    
+    // Only fall back to static categories if API completely failed
+    if (categoriesError) {
+      console.log('API failed, using static categories as fallback');
+      return BOOK_CATEGORIES.map(name => ({ _id: name, name }));
+    }
+    
+    // Return empty array while loading
+    return [];
+  }, [apiCategories, categoriesLoading, categoriesError]);
 
   // Create/Update book mutation
   const bookMutation = useMutation(
@@ -247,35 +287,30 @@ const AdminBookForm = () => {
 
                 <div>
                   <label className="form-label">Category *</label>
-                  <div className="flex gap-2">
-                    <select
-                      className={`form-input flex-1 ${errors.category ? 'border-red-500' : ''}`}
-                      {...register('category', { required: 'Category is required' })}
-                    >
-                      <option value="">Select Category</option>
-                      {categories.map(category => (
-                        <option key={category._id} value={category.name}>{category.name}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => queryClient.invalidateQueries('categories')}
-                      className="px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                      disabled={categoriesLoading}
-                      title="Refresh categories"
-                    >
-                      {categoriesLoading ? '...' : '↻'}
-                    </button>
-                  </div>
+                  <select
+                    className={`form-input ${errors.category ? 'border-red-500' : ''}`}
+                    {...register('category', { required: 'Category is required' })}
+                    disabled={categoriesLoading}
+                  >
+                    <option value="">
+                      {categoriesLoading ? 'Loading categories...' : 'Select Category'}
+                    </option>
+                    {categories.map(category => (
+                      <option key={category._id} value={category.name}>{category.name}</option>
+                    ))}
+                  </select>
                   {errors.category && <p className="text-red-500 text-sm mt-1">{errors.category.message}</p>}
                   {categoriesLoading && (
-                    <p className="text-blue-600 text-sm mt-1">
-                      Loading categories...
-                    </p>
+                    <p className="text-blue-600 text-sm mt-1">Loading admin-created categories...</p>
                   )}
                   {categoriesError && !categoriesLoading && (
                     <p className="text-yellow-600 text-sm mt-1">
-                      Using default categories (API unavailable)
+                      ⚠️ Using default categories (Admin categories unavailable)
+                    </p>
+                  )}
+                  {!categoriesLoading && !categoriesError && categories.length > 0 && (
+                    <p className="text-green-600 text-sm mt-1">
+                      ✓ Loaded {categories.length} admin-created categories
                     </p>
                   )}
                 </div>
@@ -307,10 +342,17 @@ const AdminBookForm = () => {
                     className={`form-input ${errors.price ? 'border-red-500' : ''}`}
                     {...register('price', { 
                       required: 'Price is required',
+                      valueAsNumber: true,
                       min: { value: 0, message: 'Price must be positive' }
                     })}
                   />
                   {errors.price && <p className="text-red-500 text-sm mt-1">{errors.price.message}</p>}
+                  {/* Debug info */}
+                  {isEditing && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Current price: {watch('price') || 'Not set'}
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -322,10 +364,24 @@ const AdminBookForm = () => {
                     placeholder="299.00"
                     className="form-input"
                     {...register('originalPrice', {
+                      setValueAs: (value) => {
+                        // Handle empty string or null/undefined
+                        if (value === '' || value === null || value === undefined) {
+                          return undefined;
+                        }
+                        const numValue = Number(value);
+                        return isNaN(numValue) ? undefined : numValue;
+                      },
                       min: { value: 0, message: 'Original price must be positive' }
                     })}
                   />
                   {errors.originalPrice && <p className="text-red-500 text-sm mt-1">{errors.originalPrice.message}</p>}
+                  {/* Debug info */}
+                  {isEditing && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Current value: {watchedOriginalPrice || 'Not set'}
+                    </p>
+                  )}
                 </div>
 
                 <div>
