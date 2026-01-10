@@ -186,13 +186,23 @@ const RegisterPage = () => {
               />
               <label htmlFor="terms" className="ml-2 block text-sm text-gray-900">
                 I agree to the{' '}
-                <button type="button" className="text-primary-600 hover:text-primary-500">
+                <Link 
+                  to="/page/terms-condition" 
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary-600 hover:text-primary-500 underline"
+                >
                   Terms and Conditions
-                </button>{' '}
+                </Link>{' '}
                 and{' '}
-                <button type="button" className="text-primary-600 hover:text-primary-500">
+                <Link 
+                  to="/page/privacy" 
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary-600 hover:text-primary-500 underline"
+                >
                   Privacy Policy
-                </button>
+                </Link>
               </label>
             </div>
             {errors.terms && (
