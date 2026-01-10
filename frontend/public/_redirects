@@ -1,0 +1,13 @@
+# Netlify redirects for React Router (SPA)
+# This handles client-side routing by redirecting all routes to index.html
+
+# API routes should not be redirected (if any are served from the same domain)
+/api/* https://boibabu.vercel.app/api/:splat 200
+
+# Handle React Router routes - redirect all non-file requests to index.html
+/*    /index.html   200
+
+# Force HTTPS redirect
+http://boibabu.in/* https://boibabu.in/:splat 301!
+http://www.boibabu.in/* https://boibabu.in/:splat 301!
+https://www.boibabu.in/* https://boibabu.in/:splat 301!

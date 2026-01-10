@@ -1,0 +1,46 @@
+[build]
+  base = "frontend"
+  command = "npm ci && npm run build"
+  publish = "build"
+
+[build.environment]
+  NODE_VERSION = "18"
+  NPM_VERSION = "10"
+  REACT_APP_API_URL = "https://boibabu.vercel.app"
+  GENERATE_SOURCEMAP = "false"
+  CI = "false"
+
+# SPA redirect - this is the most important part for fixing refresh issues
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Force HTTPS and www redirect
+[[redirects]]
+  from = "http://boibabu.in/*"
+  to = "https://boibabu.in/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://www.boibabu.in/*"
+  to = "https://boibabu.in/:splat"
+  status = 301
+  force = true
+
+# Security headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+# Cache static assets
+[[headers]]
+  for = "/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
