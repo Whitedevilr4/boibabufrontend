@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useQuery } from 'react-query';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
 import { BOOK_CATEGORIES } from '../../constants/categories';
@@ -28,6 +29,35 @@ const SellerBookForm = () => {
   } = useForm();
 
   const categories = BOOK_CATEGORIES;
+
+  // Fetch admin-created categories
+  const { data: apiCategories, isLoading: categoriesLoading } = useQuery(
+    'categories',
+    async () => {
+      try {
+        const response = await api.get('/api/categories');
+        return response.data;
+      } catch (error) {
+        console.error('Failed to fetch categories:', error);
+        return null; // Fall back to static categories
+      }
+    },
+    {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      retry: 2,
+      onError: () => {
+        console.log('Using static categories as fallback');
+      }
+    }
+  );
+
+  // Use admin-created categories if available, otherwise use static categories
+  const availableCategories = React.useMemo(() => {
+    if (apiCategories && Array.isArray(apiCategories) && apiCategories.length > 0) {
+      return apiCategories.map(cat => cat.name);
+    }
+    return categories;
+  }, [apiCategories, categories]);
 
   const fetchBookDetails = useCallback(async () => {
     try {
@@ -232,7 +262,7 @@ const SellerBookForm = () => {
           </div>
 
           {/* Price and Stock */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Price (₹) *
@@ -251,6 +281,24 @@ const SellerBookForm = () => {
               />
               {errors.price && (
                 <p className="mt-1 text-sm text-red-600">{errors.price.message}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Original Price (₹)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="w-full border border-gray-300 rounded-md px-3 py-2"
+                {...register('originalPrice', {
+                  min: { value: 0, message: 'Original price must be positive' }
+                })}
+              />
+              {errors.originalPrice && (
+                <p className="mt-1 text-sm text-red-600">{errors.originalPrice.message}</p>
               )}
             </div>
 
@@ -283,9 +331,12 @@ const SellerBookForm = () => {
                   errors.category ? 'border-red-500' : 'border-gray-300'
                 }`}
                 {...register('category', { required: 'Category is required' })}
+                disabled={categoriesLoading}
               >
-                <option value="">Select Category</option>
-                {categories.map(category => (
+                <option value="">
+                  {categoriesLoading ? 'Loading categories...' : 'Select Category'}
+                </option>
+                {availableCategories.map(category => (
                   <option key={category} value={category}>{category}</option>
                 ))}
               </select>
