@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from 'react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
@@ -24,6 +24,51 @@ const BooksPage = () => {
     newArrival: searchParams.get('newArrival') || ''
   });
   const [viewMode, setViewMode] = useState('grid');
+  const [searchInput, setSearchInput] = useState('');
+  const searchTimeoutRef = useRef(null);
+
+  // Debounced search function
+  useEffect(() => {
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Set new timeout
+    searchTimeoutRef.current = setTimeout(() => {
+      if (searchInput !== filters.search) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        updateFilters({ search: searchInput });
+      }
+    }, 500);
+
+    // Cleanup function
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput]); // Only depend on searchInput to avoid infinite loops
+
+  // Sync filters with URL parameters
+  useEffect(() => {
+    const newFilters = {
+      page: parseInt(searchParams.get('page')) || 1,
+      limit: 12,
+      category: searchParams.get('category') || '',
+      search: searchParams.get('search') || '',
+      sortBy: searchParams.get('sortBy') || 'createdAt',
+      sortOrder: searchParams.get('sortOrder') || 'desc',
+      minPrice: searchParams.get('minPrice') || '',
+      maxPrice: searchParams.get('maxPrice') || '',
+      featured: searchParams.get('featured') || '',
+      bestseller: searchParams.get('bestseller') || '',
+      newArrival: searchParams.get('newArrival') || ''
+    };
+    setFilters(newFilters);
+    setSearchInput(newFilters.search); // Sync search input
+  }, [searchParams]);
 
   // Fetch books
   const { data, isLoading, error } = useQuery(
@@ -39,28 +84,48 @@ const BooksPage = () => {
   );
 
   // Fetch categories with fallback
-  const { data: apiCategories } = useQuery(
+  const { data: apiCategories, isLoading: categoriesLoading } = useQuery(
     'categories',
-    () => api.get('/api/categories').then(res => res.data),
+    () => {
+      console.log('Fetching categories from API...');
+      return api.get('/api/categories').then(res => {
+        console.log('Categories fetched:', res.data);
+        return res.data;
+      });
+    },
     {
-      staleTime: 5 * 60 * 1000,
-      retry: 2,
-      onError: () => {
-        // Silently fail, we'll use fallback
+      staleTime: 10 * 60 * 1000, // 10 minutes
+      cacheTime: 30 * 60 * 1000, // 30 minutes
+      retry: 3,
+      retryDelay: 1000,
+      refetchOnWindowFocus: false,
+      onError: (error) => {
+        console.error('Failed to fetch categories:', error);
       }
     }
   );
 
   // Use API categories if available, otherwise fall back to static categories
   const categories = React.useMemo(() => {
+    console.log('Categories memo - apiCategories:', apiCategories);
+    console.log('Categories memo - categoriesLoading:', categoriesLoading);
+    
+    if (categoriesLoading) {
+      // Return static categories while loading
+      return BOOK_CATEGORIES.map(name => ({ _id: name, name }));
+    }
+    
     if (apiCategories && Array.isArray(apiCategories) && apiCategories.length > 0) {
+      console.log('Using API categories:', apiCategories.length);
       return apiCategories;
     }
+    
     // Fallback to static categories
+    console.log('Using fallback static categories');
     return BOOK_CATEGORIES.map(name => ({ _id: name, name }));
-  }, [apiCategories]);
+  }, [apiCategories, categoriesLoading]);
 
-  const updateFilters = (newFilters) => {
+  const updateFilters = useCallback((newFilters) => {
     const updatedFilters = { ...filters, ...newFilters, page: 1 };
     setFilters(updatedFilters);
     
@@ -72,10 +137,20 @@ const BooksPage = () => {
       }
     });
     setSearchParams(params);
-  };
+  }, [filters, setSearchParams]);
 
   const handlePageChange = (page) => {
-    setFilters(prev => ({ ...prev, page }));
+    const updatedFilters = { ...filters, page };
+    setFilters(updatedFilters);
+    
+    // Update URL params to include page
+    const params = new URLSearchParams();
+    Object.entries(updatedFilters).forEach(([key, value]) => {
+      if (value && key !== 'limit') {
+        params.set(key, value);
+      }
+    });
+    setSearchParams(params);
   };
 
   // Generate SEO metadata based on current filters
@@ -111,6 +186,66 @@ const BooksPage = () => {
 
   const seoData = generateSEOData();
 
+  // Generate breadcrumb data
+  const breadcrumbData = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "Home",
+        "item": "https://boibabu.in/"
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "name": filters.category || filters.search || "Books",
+        "item": `https://boibabu.in/books${window.location.search}`
+      }
+    ]
+  };
+
+  // Generate collection structured data
+  const collectionData = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    "name": seoData.title,
+    "description": seoData.description,
+    "url": `https://boibabu.in/books${window.location.search}`,
+    "mainEntity": {
+      "@type": "ItemList",
+      "numberOfItems": data?.pagination?.total || 0,
+      "itemListElement": data?.books?.slice(0, 10).map((book, index) => ({
+        "@type": "Book",
+        "position": index + 1,
+        "name": book.title,
+        "author": {
+          "@type": "Person",
+          "name": book.author
+        },
+        "isbn": book.isbn,
+        "publisher": book.publisher,
+        "image": book.images?.[0] ? (book.images[0].startsWith('http') ? book.images[0] : `https://boibabu.vercel.app${book.images[0]}`) : undefined,
+        "offers": {
+          "@type": "Offer",
+          "price": book.price,
+          "priceCurrency": "INR",
+          "availability": book.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+          "seller": {
+            "@type": "Organization",
+            "name": "BoiBabu"
+          }
+        },
+        "aggregateRating": book.rating?.count > 0 ? {
+          "@type": "AggregateRating",
+          "ratingValue": book.rating.average,
+          "reviewCount": book.rating.count
+        } : undefined
+      })) || []
+    }
+  };
+
   return (
     <>
       <Helmet>
@@ -124,38 +259,39 @@ const BooksPage = () => {
         <meta property="og:description" content={seoData.description} />
         <meta property="og:url" content={`https://boibabu.in/books${window.location.search}`} />
         <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="BoiBabu" />
+        <meta property="og:locale" content="en_IN" />
+        <meta property="og:image" content="https://boibabu.in/og-books.jpg" />
         
         {/* Twitter tags */}
+        <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={seoData.title} />
         <meta name="twitter:description" content={seoData.description} />
+        <meta name="twitter:image" content="https://boibabu.in/twitter-books.jpg" />
+        <meta name="twitter:site" content="@BoiBabu" />
         
-        {/* Structured data for book collection */}
+        {/* Additional SEO meta tags */}
+        <meta name="robots" content="index, follow, max-image-preview:large" />
+        <meta name="geo.region" content="IN" />
+        <meta name="geo.country" content="India" />
+        
+        {/* Pagination meta tags */}
+        {filters.page > 1 && (
+          <meta name="robots" content="noindex, follow" />
+        )}
+        {filters.page > 1 && (
+          <link rel="prev" href={`https://boibabu.in/books${new URLSearchParams({...Object.fromEntries(new URLSearchParams(window.location.search)), page: filters.page - 1}).toString() ? '?' + new URLSearchParams({...Object.fromEntries(new URLSearchParams(window.location.search)), page: filters.page - 1}).toString() : ''}`} />
+        )}
+        {data?.pagination?.pages && filters.page < data.pagination.pages && (
+          <link rel="next" href={`https://boibabu.in/books?${new URLSearchParams({...Object.fromEntries(new URLSearchParams(window.location.search)), page: filters.page + 1}).toString()}`} />
+        )}
+        
+        {/* Structured data */}
         <script type="application/ld+json">
-          {JSON.stringify({
-            "@context": "https://schema.org",
-            "@type": "CollectionPage",
-            "name": seoData.title,
-            "description": seoData.description,
-            "url": `https://boibabu.in/books${window.location.search}`,
-            "mainEntity": {
-              "@type": "ItemList",
-              "numberOfItems": data?.pagination?.total || 0,
-              "itemListElement": data?.books?.slice(0, 10).map((book, index) => ({
-                "@type": "Book",
-                "position": index + 1,
-                "name": book.title,
-                "author": book.author,
-                "isbn": book.isbn,
-                "publisher": book.publisher,
-                "offers": {
-                  "@type": "Offer",
-                  "price": book.price,
-                  "priceCurrency": "INR",
-                  "availability": book.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock"
-                }
-              })) || []
-            }
-          })}
+          {JSON.stringify(breadcrumbData)}
+        </script>
+        <script type="application/ld+json">
+          {JSON.stringify(collectionData)}
         </script>
       </Helmet>
 
@@ -169,6 +305,30 @@ const BooksPage = () => {
           
           {/* Filters Bar */}
           <div className="bg-white rounded-lg shadow-sm p-4 sm:p-6 mb-4 sm:mb-6">
+            {/* Search Input */}
+            <div className="mb-4">
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Search books, authors, publishers..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm sm:text-base"
+                />
+                {searchInput && (
+                  <button
+                    onClick={() => {
+                      setSearchInput('');
+                      updateFilters({ search: '' });
+                    }}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+            
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {/* Category Filter */}
               <select
