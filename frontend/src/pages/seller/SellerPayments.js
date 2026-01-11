@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useQuery } from 'react-query';
 import api from '../../utils/api';
 import { formatPrice } from '../../utils/currency';
 import {
@@ -17,6 +18,18 @@ const SellerPayments = () => {
     page: 1
   });
   const [pagination, setPagination] = useState({});
+
+  // Fetch website settings to get current commission rate
+  const { data: websiteSettings } = useQuery(
+    'websiteSettings',
+    () => api.get('/api/admin/website-settings/public').then(res => res.data),
+    { 
+      staleTime: 30 * 1000, // 30 seconds instead of 10 minutes
+      onSuccess: (data) => {
+        console.log('SellerPayments - Website settings loaded:', data?.features?.commissionRate);
+      }
+    }
+  );
 
   const fetchPayments = useCallback(async () => {
     try {
@@ -161,7 +174,7 @@ const SellerPayments = () => {
                         </span>
                       </div>
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Admin Commission (2.5%):</span>
+                        <span className="text-gray-600">Admin Commission ({payment.commissionRate || websiteSettings?.features?.commissionRate || 5}%):</span>
                         <span className="font-medium text-red-600">
                           -{formatPrice(payment.adminCommission)}
                         </span>
