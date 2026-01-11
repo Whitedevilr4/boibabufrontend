@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from 'react-query';
 import api from '../../utils/api';
 import { formatPrice } from '../../utils/currency';
 import {
@@ -14,16 +15,32 @@ const SellerDashboard = () => {
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Fetch website settings to get current commission rate
+  const { data: websiteSettings } = useQuery(
+    'websiteSettings',
+    () => api.get('/api/admin/website-settings/public').then(res => res.data),
+    { 
+      staleTime: 30 * 1000, // 30 seconds instead of 10 minutes
+      onSuccess: (data) => {
+        console.log('SellerDashboard - Website settings loaded:', data?.features?.commissionRate);
+      }
+    }
+  );
+
   useEffect(() => {
     fetchDashboardData();
   }, []);
 
   const fetchDashboardData = async () => {
     try {
+      console.log('Fetching seller dashboard data...');
       const response = await api.get('/api/seller/dashboard');
+      console.log('Dashboard response:', response.data);
       setDashboardData(response.data);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
+      console.error('Error response:', error.response?.data);
+      console.error('Error status:', error.response?.status);
     } finally {
       setLoading(false);
     }
@@ -91,7 +108,7 @@ const SellerDashboard = () => {
       value: formatPrice(stats.totalCommission || 0),
       icon: CurrencyRupeeIcon,
       color: 'bg-red-500',
-      description: '2.5% platform fee'
+      description: `${websiteSettings?.features?.commissionRate || 2.5}% platform fee`
     },
     {
       name: 'Shipping Charges',
