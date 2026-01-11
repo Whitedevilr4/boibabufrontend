@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from 'react-query';
 import api from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatPrice } from '../../utils/currency';
@@ -21,6 +22,18 @@ const SellerOrders = () => {
     status: 'all',
     page: 1
   });
+
+  // Fetch website settings to get current commission rate
+  const { data: websiteSettings } = useQuery(
+    'websiteSettings',
+    () => api.get('/api/admin/website-settings/public').then(res => res.data),
+    { 
+      staleTime: 30 * 1000, // 30 seconds instead of 10 minutes
+      onSuccess: (data) => {
+        console.log('SellerOrders - Website settings loaded:', data?.features?.commissionRate);
+      }
+    }
+  );
 
   useEffect(() => {
     console.log('SellerOrders component mounted, user:', {
@@ -271,7 +284,7 @@ const SellerOrders = () => {
                             </span>
                           </div>
                           <div>
-                            <span className="text-blue-700">Admin Commission (2.5%):</span>
+                            <span className="text-blue-700">Admin Commission ({order.sellerPayment.commissionRate || websiteSettings?.features?.commissionRate || 5}%):</span>
                             <span className="font-medium text-red-600 ml-2">
                               -{formatPrice(order.sellerPayment.adminCommission)}
                             </span>
