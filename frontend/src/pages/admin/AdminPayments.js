@@ -25,10 +25,24 @@ const AdminPayments = () => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentNotes, setPaymentNotes] = useState('');
   const [showCommissionModal, setShowCommissionModal] = useState(false);
-  const [commissionRate, setCommissionRate] = useState('2.5');
+  const [commissionRate, setCommissionRate] = useState('');
   const [selectedSellerPayment, setSelectedSellerPayment] = useState(null);
 
   const queryClient = useQueryClient();
+
+  // Fetch website settings to get current commission rate
+  const { data: websiteSettings } = useQuery(
+    'websiteSettings',
+    () => api.get('/api/admin/website-settings').then(res => res.data),
+    { staleTime: 5 * 60 * 1000 }
+  );
+
+  // Set commission rate from website settings when available
+  React.useEffect(() => {
+    if (websiteSettings?.features?.commissionRate && !commissionRate) {
+      setCommissionRate(websiteSettings.features.commissionRate.toString());
+    }
+  }, [websiteSettings, commissionRate]);
 
   // Fetch orders with seller payments
   const { data: ordersData, isLoading, error } = useQuery(
@@ -96,6 +110,7 @@ const AdminPayments = () => {
     {
       onSuccess: () => {
         queryClient.invalidateQueries(['adminPayments']);
+        queryClient.invalidateQueries(['websiteSettings']);
         toast.success('Commission rate updated successfully');
         setShowCommissionModal(false);
       },
@@ -181,7 +196,7 @@ const AdminPayments = () => {
 
   const handleEditCommission = (order, payment) => {
     setSelectedSellerPayment({ order, payment });
-    setCommissionRate(payment.commissionRate?.toString() || '2.5');
+    setCommissionRate(payment.commissionRate?.toString() || websiteSettings?.features?.commissionRate?.toString() || '2.5');
     setShowCommissionModal(true);
   };
 
@@ -221,11 +236,15 @@ const AdminPayments = () => {
           <p className="text-gray-600 mt-1">Manage seller payments and shipping charges</p>
         </div>
         <button
-          onClick={() => setShowCommissionModal(true)}
+          onClick={() => {
+            setSelectedSellerPayment(null);
+            setCommissionRate(websiteSettings?.features?.commissionRate?.toString() || '5');
+            setShowCommissionModal(true);
+          }}
           className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           <PencilIcon className="h-4 w-4 mr-2" />
-          Edit Commission Rate
+          Edit Commission Rate ({websiteSettings?.features?.commissionRate || 5}%)
         </button>
       </div>
 
@@ -545,6 +564,16 @@ const AdminPayments = () => {
               <h3 className="text-lg font-medium text-gray-900 mb-4">
                 {selectedSellerPayment ? 'Edit Commission Rate' : 'Update Global Commission Rate'}
               </h3>
+              {!selectedSellerPayment && (
+                <div className="mb-4 p-3 bg-blue-50 rounded">
+                  <p className="text-sm text-blue-800">
+                    <strong>Current Global Rate:</strong> {websiteSettings?.features?.commissionRate || 2.5}%
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    This will update the commission rate for all existing delivered orders and future orders.
+                  </p>
+                </div>
+              )}
               {selectedSellerPayment && (
                 <div className="mb-4 p-3 bg-gray-50 rounded">
                   <p className="text-sm text-gray-600">
